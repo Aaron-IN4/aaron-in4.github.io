@@ -163,7 +163,6 @@
         document.body.appendChild(renderer.domElement);
 
         // Player setup
-
         player = {
           position: new THREE.Vector3(0, PLAYER_HEIGHT, 0),
           velocity: new THREE.Vector3(0, 0, 0),
@@ -487,357 +486,283 @@
           defeated: false,
           position: new THREE.Vector3(x, 1, z),
           velocity: new THREE.Vector3(0, 0, 0),
-          health: 100,
+          health: 100, // Add health to the enemy
           lastAttackTime: 0,
           radius: 0.8,
         });
       }
 
-      // Shoot a bullet
-      function shootBullet() {
-        if (isGameOver) return;
-
-        const bulletGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-        const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-
-        // Position bullet at player position
-        bullet.position.copy(player.position);
-
-        // Set bullet direction based on camera direction
-        const direction = new THREE.Vector3(0, 0, -1);
-        direction.applyQuaternion(camera.quaternion);
-
-        scene.add(bullet);
-
-        bullets.push({
-          mesh: bullet,
-          direction: direction,
-          distance: 0,
+      // Create a smoke puff
+      function createSmokePuff(position) {
+        const smokeGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+        const smokeMaterial = new THREE.MeshBasicMaterial({
+          color: 0x888888,
+          transparent: true,
+          opacity: 0.8,
         });
+        const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+        smoke.position.copy(position);
+        scene.add(smoke);
+
+        // Animate the smoke puff
+        const smokePuff = {
+          mesh: smoke,
+          scale: 0.5,
+          opacity: 0.8,
+        };
+
+        // Animate the smoke puff
+        function animateSmoke() {
+          smokePuff.scale += 0.02;
+          smokePuff.opacity -= 0.02;
+          smoke.scale.set(smokePuff.scale, smokePuff.scale, smokePuff.scale);
+          smoke.material.opacity = smokePuff.opacity;
+
+          if (smokePuff.opacity > 0) {
+            requestAnimationFrame(animateSmoke);
+          } else {
+            scene.remove(smoke);
+          }
+        }
+
+        animateSmoke();
       }
 
-      // Handle keyboard input
-      // Handle keyboard input
+      // Handle key down events
       function onKeyDown(event) {
-        switch (event.code) {
-          case "KeyW":
-            player.moveForward = true;
-            break;
-          case "KeyS":
-            player.moveBackward = true;
-            break;
-          case "KeyA":
-            player.moveLeft = true;
-            break;
-          case "KeyD":
-            player.moveRight = true;
-            break;
-        }
+        keyboard[event.code] = true;
+
+        if (event.code === "KeyW") player.moveForward = true;
+        if (event.code === "KeyS") player.moveBackward = true;
+        if (event.code === "KeyA") player.moveLeft = true;
+        if (event.code === "KeyD") player.moveRight = true;
       }
 
-      // Handle key release
+      // Handle key up events
       function onKeyUp(event) {
-        switch (event.code) {
-          case "KeyW":
-            player.moveForward = false;
-            break;
-          case "KeyS":
-            player.moveBackward = false;
-            break;
-          case "KeyA":
-            player.moveLeft = false;
-            break;
-          case "KeyD":
-            player.moveRight = false;
-            break;
+        keyboard[event.code] = false;
+
+        if (event.code === "KeyW") player.moveForward = false;
+        if (event.code === "KeyS") player.moveBackward = false;
+        if (event.code === "KeyA") player.moveLeft = false;
+        if (event.code === "KeyD") player.moveRight = false;
+      }
+
+      // Handle mouse down events
+      function onMouseDown(event) {
+        if (pointerLocked && !isGameOver) {
+          shoot();
         }
       }
 
-      // Handle mouse movement
+      // Handle mouse move events
       function onMouseMove(event) {
-        if (!pointerLocked) return;
-        player.rotation.y -= event.movementX * 0.002;
-        player.rotation.x -= event.movementY * 0.002;
-        player.rotation.x = Math.max(
-          -Math.PI / 2,
-          Math.min(Math.PI / 2, player.rotation.x)
-        );
+        if (pointerLocked && !isGameOver) {
+          const movementX =
+            event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+          const movementY =
+            event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+          player.rotation.y -= movementX * 0.002;
+          player.rotation.x -= movementY * 0.002;
+
+          // Limit vertical rotation to prevent flipping
+          player.rotation.x = Math.max(
+            -Math.PI / 2,
+            Math.min(Math.PI / 2, player.rotation.x)
+          );
+        }
       }
 
-      // Game loop
-      function animate(time) {
-        if (!gameStarted) return;
-        requestAnimationFrame(animate);
-        const delta = (time - lastTime) / 1000;
-        lastTime = time;
-        updatePlayer(delta);
-        updateEnemies(delta);
-        updateBullets(delta);
-        checkCollisions();
-        updateUI();
-        renderer.render(scene, camera);
+      // Shoot a bullet
+      function shoot() {
+        const bullet = {
+          position: new THREE.Vector3().copy(player.position),
+          velocity: new THREE.Vector3(0, 0, -1).applyEuler(player.rotation),
+          radius: 0.1,
+        };
+
+        bullets.push(bullet);
+
+        // Check for collisions with enemies
+        for (let i = 0; i < enemies.length; i++) {
+          const enemy = enemies[i];
+          if (
+            !enemy.defeated &&
+            bullet.position.distanceTo(enemy.position) <
+              enemy.radius + bullet.radius
+          ) {
+            enemy.health -= 50; // Reduce enemy health
+            if (enemy.health <= 0) {
+              enemy.defeated = true;
+              enemiesDefeated++;
+              document.getElementById("enemies").textContent = enemiesDefeated;
+              playerScore += 100;
+              document.getElementById("score").textContent = playerScore;
+              createSmokePuff(enemy.position);
+              scene.remove(enemy.group);
+            }
+            bullets.splice(bullets.indexOf(bullet), 1);
+            break;
+          }
+        }
+
+        // Check for collisions with walls
+        for (let i = 0; i < walls.length; i++) {
+          const wall = walls[i];
+          if (
+            bullet.position.distanceTo(wall.position) <
+            wall.width / 2 + bullet.radius
+          ) {
+            bullets.splice(bullets.indexOf(bullet), 1);
+            break;
+          }
+        }
       }
 
-      // Update player position and movement
-      function updatePlayer(delta) {
-        if (!gameStarted || isGameOver) return;
+      // Update player movement
+      function updatePlayer(deltaTime) {
+        const speed = player.speed * deltaTime;
 
-        console.log("Update player called");
-        console.log(
-          "Movement flags:",
-          player.moveForward,
-          player.moveBackward,
-          player.moveLeft,
-          player.moveRight
-        );
+        if (player.moveForward) {
+          player.position.x -= Math.sin(player.rotation.y) * speed;
+          player.position.z -= Math.cos(player.rotation.y) * speed;
+        }
+        if (player.moveBackward) {
+          player.position.x += Math.sin(player.rotation.y) * speed;
+          player.position.z += Math.cos(player.rotation.y) * speed;
+        }
+        if (player.moveLeft) {
+          player.position.x -= Math.cos(player.rotation.y) * speed;
+          player.position.z += Math.sin(player.rotation.y) * speed;
+        }
+        if (player.moveRight) {
+          player.position.x += Math.cos(player.rotation.y) * speed;
+          player.position.z -= Math.sin(player.rotation.y) * speed;
+        }
 
-        const direction = new THREE.Vector3();
-        if (player.moveForward) direction.z -= 1;
-        if (player.moveBackward) direction.z += 1;
-        if (player.moveLeft) direction.x -= 1;
-        if (player.moveRight) direction.x += 1;
-        direction.normalize();
-        player.position.add(
-          direction
-            .applyEuler(player.rotation)
-            .multiplyScalar(player.speed * delta)
-        );
+        // Check for collisions with walls
+        for (let i = 0; i < walls.length; i++) {
+          const wall = walls[i];
+          if (
+            player.position.distanceTo(wall.position) <
+            wall.width / 2 + 0.5
+          ) {
+            player.position.x =
+              player.position.x - Math.sin(player.rotation.y) * speed;
+            player.position.z =
+              player.position.z - Math.cos(player.rotation.y) * speed;
+          }
+        }
+
+        // Update camera position
         camera.position.copy(player.position);
         camera.rotation.copy(player.rotation);
       }
 
-      // Restart the game
+      // Update enemies
+      function updateEnemies(deltaTime) {
+        for (let i = 0; i < enemies.length; i++) {
+          const enemy = enemies[i];
+          if (!enemy.defeated) {
+            const direction = new THREE.Vector3()
+              .subVectors(player.position, enemy.position)
+              .normalize();
+            enemy.velocity.copy(
+              direction.multiplyScalar(ENEMY_SPEED * deltaTime)
+            );
+            enemy.position.add(enemy.velocity);
+
+            // Check for collisions with player
+            if (enemy.position.distanceTo(player.position) < 1) {
+              playerHealth -= 10;
+              document.getElementById("health").textContent = playerHealth;
+              if (playerHealth <= 0) {
+                gameOver(false);
+              }
+            }
+          }
+        }
+      }
+
+      // Update bullets
+      function updateBullets(deltaTime) {
+        for (let i = 0; i < bullets.length; i++) {
+          const bullet = bullets[i];
+          bullet.position.add(
+            bullet.velocity.multiplyScalar(BULLET_SPEED * deltaTime)
+          );
+
+          // Remove bullets that are too far away
+          if (bullet.position.distanceTo(player.position) > 50) {
+            bullets.splice(i, 1);
+            i--;
+          }
+        }
+      }
+
+      // Update tokens
+      function updateTokens() {
+        for (let i = 0; i < tokens.length; i++) {
+          const token = tokens[i];
+          if (
+            !token.collected &&
+            player.position.distanceTo(token.position) < token.radius
+          ) {
+            token.collected = true;
+            tokensCollected++;
+            document.getElementById("tokens").textContent = tokensCollected;
+            playerScore += 50;
+            document.getElementById("score").textContent = playerScore;
+            scene.remove(token.group);
+          }
+        }
+      }
+
+      // Check for game over conditions
+      function checkGameOver() {
+        if (
+          tokensCollected >= TOTAL_TOKENS &&
+          enemiesDefeated >= TOTAL_ENEMIES
+        ) {
+          gameOver(true);
+        }
+      }
+
+      // Game over function
+      function gameOver(win) {
+        isGameOver = true;
+        document.getElementById("gameOver").style.display = "block";
+        document.getElementById("gameOverMessage").textContent = win
+          ? "You Win!"
+          : "Game Over!";
+      }
+
+      // Restart game
       function restartGame() {
-        window.location.reload();
+        location.reload();
+      }
+
+      // Main animation loop
+      function animate(time) {
+        if (!isGameOver) {
+          requestAnimationFrame(animate);
+        }
+
+        const deltaTime = (time - lastTime) / 1000;
+        lastTime = time;
+
+        updatePlayer(deltaTime);
+        updateEnemies(deltaTime);
+        updateBullets(deltaTime);
+        updateTokens();
+        checkGameOver();
+
+        renderer.render(scene, camera);
       }
 
       // Initialize the game
       init();
-
-      // Update enemy positions
-      function updateEnemies(delta) {
-        enemies.forEach((enemy) => {
-          if (enemy.defeated) return;
-
-          // Calculate direction to player
-          const direction = new THREE.Vector3();
-          direction.subVectors(player.position, enemy.position);
-          direction.y = 0; // Keep enemies on the ground
-          direction.normalize();
-
-          // Set enemy velocity
-          enemy.velocity.copy(direction).multiplyScalar(ENEMY_SPEED * delta);
-
-          // Update enemy position
-          enemy.position.add(enemy.velocity);
-          enemy.group.position.copy(enemy.position);
-
-          // Make enemy face the player
-          enemy.group.lookAt(
-            new THREE.Vector3(
-              player.position.x,
-              enemy.position.y,
-              player.position.z
-            )
-          );
-
-          // Check if enemy can attack player
-          const distanceToPlayer = enemy.position.distanceTo(player.position);
-          const currentTime = Date.now();
-
-          if (
-            distanceToPlayer < 2 &&
-            currentTime - enemy.lastAttackTime > 1000
-          ) {
-            // Enemy attacks player
-            playerHealth -= 10;
-            enemy.lastAttackTime = currentTime;
-
-            if (playerHealth <= 0) {
-              endGame(false);
-            }
-          }
-        });
-      }
-
-      // Update bullets
-      function updateBullets(delta) {
-        for (let i = bullets.length - 1; i >= 0; i--) {
-          const bullet = bullets[i];
-
-          // Move bullet
-          bullet.mesh.position.add(
-            bullet.direction.clone().multiplyScalar(BULLET_SPEED * delta)
-          );
-
-          // Increase distance traveled
-          bullet.distance += BULLET_SPEED * delta;
-
-          // Remove bullet if it has traveled too far
-          if (bullet.distance > 50) {
-            scene.remove(bullet.mesh);
-            bullets.splice(i, 1);
-          }
-        }
-      }
-
-      // Check for collisions
-      function checkCollisions() {
-        // Check bullet-enemy collisions
-        for (let i = bullets.length - 1; i >= 0; i--) {
-          const bullet = bullets[i];
-
-          // Check collision with enemies
-          for (let j = 0; j < enemies.length; j++) {
-            const enemy = enemies[j];
-            if (enemy.defeated) continue;
-
-            const distance = bullet.mesh.position.distanceTo(enemy.position);
-
-            if (distance < enemy.radius) {
-              // Bullet hit enemy
-              enemy.health -= 25;
-              scene.remove(bullet.mesh);
-              bullets.splice(i, 1);
-
-              // Enemy defeated
-              if (enemy.health <= 0) {
-                enemy.defeated = true;
-                scene.remove(enemy.group);
-                enemiesDefeated++;
-                playerScore += 100;
-
-                // Check if all enemies are defeated
-                checkWinCondition();
-              }
-
-              break;
-            }
-          }
-        }
-
-        // Check player-token collisions
-        tokens.forEach((token) => {
-          if (token.collected) return;
-
-          const distance = player.position.distanceTo(token.position);
-
-          if (distance < token.radius) {
-            // Player collected token
-            token.collected = true;
-            scene.remove(token.group);
-            tokensCollected++;
-            playerScore += 50;
-
-            // Check if all tokens are collected
-            checkWinCondition();
-          }
-        });
-
-        // Check player-wall collisions
-        const playerRadius = 0.1;
-        walls.forEach((wall) => {
-          const halfWidth = wall.width / 2;
-          const halfDepth = wall.depth / 2;
-
-          // Calculate the closest point on the wall to the player
-          const closestX = Math.max(
-            wall.position.x - halfWidth,
-            Math.min(player.position.x, wall.position.x + halfWidth)
-          );
-          const closestZ = Math.max(
-            wall.position.z - halfDepth,
-            Math.min(player.position.z, wall.position.z + halfDepth)
-          );
-
-          // Calculate distance from player to closest point
-          const distanceX = player.position.x - closestX;
-          const distanceZ = player.position.z - closestZ;
-          const distance = Math.sqrt(
-            distanceX * distanceX + distanceZ * distanceZ
-          );
-
-          // If collision detected, move player away from wall
-          if (distance < playerRadius) {
-            const angle = Math.atan2(distanceZ, distanceX);
-            const pushDistance = playerRadius - distance;
-
-            player.position.x += Math.cos(angle) * pushDistance;
-            player.position.z += Math.sin(angle) * pushDistance;
-          }
-        });
-      }
-
-      // Update UI elements
-      function updateUI() {
-        document.getElementById("health").textContent = playerHealth;
-        document.getElementById("tokens").textContent = tokensCollected;
-        document.getElementById("enemies").textContent = enemiesDefeated;
-        document.getElementById("score").textContent = playerScore;
-
-        // Animate tokens
-        tokens.forEach((token) => {
-          if (token.collected) return;
-
-          token.fireGroup.rotation.y += 0.02;
-
-          // Animate each flame
-          token.fireGroup.children.forEach((flame) => {
-            flame.position.y =
-              0.5 +
-              Math.random() * 0.1 +
-              Math.sin(Date.now() * 0.002 + flame.userData.verticalOffset) *
-                0.1;
-
-            // Random flickering
-            flame.scale.x = 0.5 + Math.random() * 0.2;
-            flame.scale.z = 0.5 + Math.random() * 0.2;
-          });
-
-          // Flicker light intensity
-          token.light.intensity = 1.3 + Math.random() * 0.4;
-        });
-      }
-
-      // Check if player has won
-      function checkWinCondition() {
-        if (
-          tokensCollected === TOTAL_TOKENS &&
-          enemiesDefeated === TOTAL_ENEMIES
-        ) {
-          endGame(true);
-        }
-      }
-
-      // Handle mouse button press
-      function onMouseDown(event) {
-        if (!pointerLocked || isGameOver) return;
-
-        // Left mouse button
-        if (event.button === 0) {
-          shootBullet();
-        }
-      }
-
-      // End the game
-      function endGame(won) {
-        isGameOver = true;
-        document.exitPointerLock();
-
-        const gameOverDiv = document.getElementById("gameOver");
-        const gameOverMessage = document.getElementById("gameOverMessage");
-
-        if (won) {
-          gameOverMessage.innerHTML = `YOU WIN!<br>Final Score: ${playerScore}`;
-          gameOverMessage.style.color = "#00ff00";
-        } else {
-          gameOverMessage.innerHTML = `GAME OVER<br>Final Score: ${playerScore}`;
-          gameOverMessage.style.color = "#ff0000";
-        }
-
-        gameOverDiv.style.display = "block";
-      }
     </script>
   </body>
 </html>

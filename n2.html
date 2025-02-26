@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Doom-Style Game</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+      }
+      #ui {
+        position: absolute;
+        bottom: 20px;
+        width: 100%;
+        text-align: center;
+        color: white;
+        font-family: Arial, sans-serif;
+        font-size: 24px;
+        text-shadow: 2px 2px 4px #000;
+      }
+      #crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 20px;
+        height: 20px;
+        margin-left: -10px;
+        margin-top: -10px;
+        color: white;
+        font-size: 20px;
+        text-align: center;
+        pointer-events: none;
+      }
+      #gameOver {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: red;
+        font-family: Arial, sans-serif;
+        font-size: 48px;
+        text-align: center;
+        display: none;
+      }
+      #startScreen {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: red;
+        font-family: Arial, sans-serif;
+      }
+      #startScreen h1 {
+        font-size: 48px;
+        margin-bottom: 20px;
+      }
+      #startScreen button {
+        padding: 10px 20px;
+        font-size: 24px;
+        background-color: red;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      #score {
+        font-weight: bold;
+        color: yellow;
+      }
+      #controlMessage {
+        position: absolute;
+        top: 20px;
+        width: 100%;
+        text-align: center;
+        color: white;
+        font-family: Arial, sans-serif;
+        font-size: 16px;
+        text-shadow: 1px 1px 2px #000;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="startScreen">
+      <h1>DOOM-STYLE GAME</h1>
+      <p>Collect all tokens and defeat all enemies to win!</p>
+      <p>Controls: WASD to move, Mouse to look, Click to shoot</p>
+      <button id="startButton">START GAME</button>
+    </div>
+    <div id="crosshair">+</div>
+    <div id="ui">
+      <div>
+        Health: <span id="health">100</span> | Tokens:
+        <span id="tokens">0</span>/<span id="totalTokens">0</span> | Enemies:
+        <span id="enemies">0</span>/<span id="totalEnemies">0</span> | Score:
+        <span id="score">0</span>
+      </div>
+    </div>
+    <div id="controlMessage">
+      Click to enable mouse control. Use WASD to move.
+    </div>
+    <div id="gameOver">
+      <div id="gameOverMessage"></div>
+      <button id="restartButton">Play Again</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+      let scene, camera, renderer, player;
+      let keyboard = {},
+        tokens = [],
+        enemies = [],
+        bullets = [],
+        walls = [];
+      let playerHealth = 100,
+        tokensCollected = 0,
+        enemiesDefeated = 0,
+        isGameOver = false,
+        lastTime = 0,
+        pointerLocked = false,
+        playerScore = 0,
+        gameStarted = false;
+      const PLAYER_SPEED = 5,
+        ENEMY_SPEED = 2,
+        BULLET_SPEED = 20,
+        WALL_HEIGHT = 4,
+        PLAYER_HEIGHT = 1.8,
+        MAP_SIZE = 40,
+        TOTAL_TOKENS = 10,
+        TOTAL_ENEMIES = 5;
+
+      function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+        scene.fog = new THREE.Fog(0x111111, 0, 40);
+
+        camera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+        camera.position.y = PLAYER_HEIGHT;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        player = {
+          position: new THREE.Vector3(0, PLAYER_HEIGHT, 0),
+          velocity: new THREE.Vector3(0, 0, 0),
+          rotation: new THREE.Euler(0, 0, 0, "YXZ"),
+          speed: PLAYER_SPEED,
+          moveForward: false,
+          moveBackward: false,
+          moveLeft: false,
+          moveRight: false,
+        };
+
+        const ambientLight = new THREE.AmbientLight(0x909090);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        const floorGeometry = new THREE.PlaneGeometry(
+          MAP_SIZE * 2,
+          MAP_SIZE * 2
+        );
+        const floorMaterial = new THREE.MeshStandardMaterial({
+          color: 0x555555,
+          roughness: 0.8,
+          metalness: 0.2,
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = 0;
+        scene.add(floor);
+
+        const ceilingGeometry = new THREE.PlaneGeometry(
+          MAP_SIZE * 2,
+          MAP_SIZE * 2
+        );
+        const ceilingMaterial = new THREE.MeshStandardMaterial({
+          color: 0x222222,
+          roughness: 0.9,
+          metalness: 0.1,
+        });
+        const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+        ceiling.rotation.x = Math.PI / 2;
+        ceiling.position.y = WALL_HEIGHT;
+        scene.add(ceiling);
+
+        createLevel();
+
+        document.getElementById("totalTokens").textContent = TOTAL_TOKENS;
+        document.getElementById("totalEnemies").textContent = TOTAL_ENEMIES;
+        document.getElementById("score").textContent = playerScore;
+
+        document.addEventListener("keydown", onKeyDown, false);
+        document.addEventListener("keyup", onKeyUp, false);
+        document.addEventListener("mousedown", onMouseDown, false);
+        document.addEventListener("mousemove", onMouseMove, false);
+
+        renderer.domElement.addEventListener(
+          "click",
+          requestPointerLock,
+          false
+        );
+        document.addEventListener(
+          "pointerlockchange",
+          pointerLockChange,
+          false
+        );
+        document.addEventListener(
+          "mozpointerlockchange",
+          pointerLockChange,
+          false
+        );
+        document.addEventListener(
+          "webkitpointerlockchange",
+          pointerLockChange,
+          false
+        );
+
+        window.addEventListener("resize", () => {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        document.getElementById("startButton").addEventListener("click", () => {
+          document.getElementById("startScreen").style.display = "none";
+          document.getElementById("controlMessage").style.display = "block";
+          gameStarted = true;
+          requestPointerLock();
+          animate(0);
+        });
+
+        document
+          .getElementById("restartButton")
+          .addEventListener("click", restartGame);
+      }
+
+      function requestPointerLock() {
+        if (gameStarted) {
+          const element = renderer.domElement;
+          element.requestPointerLock =
+            element.requestPointerLock ||
+            element.mozRequestPointerLock ||
+            element.webkitRequestPointerLock;
+          element.requestPointerLock();
+        }
+      }
+
+      function pointerLockChange() {
+        if (
+          document.pointerLockElement === renderer.domElement ||
+          document.mozPointerLockElement === renderer.domElement ||
+          document.webkitPointerLockElement === renderer.domElement
+        ) {
+          pointerLocked = true;
+          document.getElementById("controlMessage").style.display = "none";
+        } else {
+          pointerLocked = false;
+          if (gameStarted && !isGameOver) {
+            document.getElementById("controlMessage").style.display = "block";
+          }
+        }
+      }
+
+      function createLevel() {
+        createWall(-MAP_SIZE / 2, 0, 0, MAP_SIZE, 0);
+        createWall(MAP_SIZE / 2, 0, 0, MAP_SIZE, 0);
+        createWall(0, 0, -MAP_SIZE / 2, 0, MAP_SIZE);
+        createWall(0, 0, MAP_SIZE / 2, 0, MAP_SIZE);
+
+        createWall(-15, 0, -5, 10, 0);
+        createWall(5, 0, 5, 20, 0);
+        createWall(-10, 0, 15, 0, 10);
+        createWall(15, 0, -15, 0, 15);
+        createWall(-5, 0, -20, 0, 10);
+
+        const tokenPositions = [
+          [-15, 10],
+          [12, -12],
+          [-12, -8],
+          [18, 8],
+          [5, -15],
+          [-8, 18],
+          [-18, -18],
+          [15, 15],
+          [-10, -15],
+          [8, -5],
+        ];
+        for (let i = 0; i < TOTAL_TOKENS; i++)
+          createToken(...tokenPositions[i]);
+
+        const enemyPositions = [
+          [-10, -10],
+          [10, 10],
+          [-18, 0],
+          [18, -5],
+          [0, 18],
+        ];
+        for (let i = 0; i < TOTAL_ENEMIES; i++)
+          createEnemy(...enemyPositions[i]);
+      }
+
+      function createWall(x, y, z, width, depth) {
+        const wallGeometry = new THREE.BoxGeometry(
+          width || 1,
+          WALL_HEIGHT,
+          depth || 1
+        );
+        const wallMaterial = new THREE.MeshStandardMaterial({
+          color: 0xa06030,
+          roughness: 0.7,
+          metalness: 0.2,
+        });
+        const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+        wall.position.set(x, y + WALL_HEIGHT / 2, z);
+        scene.add(wall);
+        walls.push({
+          mesh: wall,
+          width: width || 1,
+          depth: depth || 1,
+          position: new THREE.Vector3(x, y, z),
+        });
+      }
+
+      function createToken(x, z) {
+        const tokenGroup = new THREE.Group();
+        tokenGroup.position.set(x, 1, z);
+
+        const baseGeometry = new THREE.CylinderGeometry(0.3, 0.5, 0.5, 8);
+        const baseMaterial = new THREE.MeshStandardMaterial({
+          color: 0x555555,
+        });
+        const base = new THREE.Mesh(baseGeometry, baseMaterial);
+        base.position.y = 0.25;
+        tokenGroup.add(base);
+
+        const fireGroup = new THREE.Group();
+        const flameColors = [0xff9500, 0xff5500, 0xff0000];
+        for (let i = 0; i < 5; i++) {
+          const flameGeometry = new THREE.ConeGeometry(0.2, 1, 8);
+          const flameMaterial = new THREE.MeshBasicMaterial({
+            color: flameColors[Math.floor(Math.random() * flameColors.length)],
+            transparent: true,
+            opacity: 0.8,
+          });
+          const flame = new THREE.Mesh(flameGeometry, flameMaterial);
+          flame.position.set(
+            (Math.random() - 0.5) * 0.2,
+            0.5 + Math.random() * 0.5,
+            (Math.random() - 0.5) * 0.2
+          );
+          flame.rotation.x = (Math.random() - 0.5) * 0.5;
+          flame.rotation.z = (Math.random() - 0.5) * 0.5;
+          const scale = 0.5 + Math.random() * 0.5;
+          flame.scale.set(scale, scale, scale);
+          flame.userData = {
+            speed: 0.3 + Math.random() * 0.5,
+            verticalOffset: Math.random() * Math.PI * 2,
+          };
+          fireGroup.add(flame);
+        }
+        tokenGroup.add(fireGroup);
+        scene.add(tokenGroup);
+
+        const light = new THREE.PointLight(0xff5500, 1.5, 6);
+        light.position.set(0, 1, 0);
+        tokenGroup.add(light);
+
+        tokens.push({
+          group: tokenGroup,
+          fireGroup: fireGroup,
+          light: light,
+          collected: false,
+          position: new THREE.Vector3(x, 1, z),
+          radius: 0.7,
+        });
+      }
+
+      function createEnemy(x, z) {
+        const enemyGroup = new THREE.Group();
+        enemyGroup.position.set(x, 1, z);
+
+        const bodyGeometry = new THREE.BoxGeometry(1, 1.8, 1);
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+          color: 0xbb0000,
+        });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.y = 0.9;
+        enemyGroup.add(body);
+
+        const headGeometry = new THREE.SphereGeometry(0.4, 8, 8);
+        const headMaterial = new THREE.MeshStandardMaterial({
+          color: 0x880000,
+        });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.y = 2.1;
+        enemyGroup.add(head);
+
+        const eyeGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(0.2, 2.2, 0.3);
+        enemyGroup.add(leftEye);
+
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(-0.2, 2.2, 0.3);
+        enemyGroup.add(rightEye);
+
+        scene.add(enemyGroup);
+
+        enemies.push({
+          group: enemyGroup,
+          defeated: false,
+          position: new THREE.Vector3(x, 1, z),
+          velocity: new THREE.Vector3(0, 0, 0),
+          health: 100,
+          lastAttackTime: 0,
+          radius: 0.8,
+        });
+      }
+
+      function createSmokePuff(position) {
+        const smokeGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+        const smokeMaterial = new THREE.MeshBasicMaterial({
+          color: 0x888888,
+          transparent: true,
+          opacity: 0.8,
+        });
+        const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+        smoke.position.copy(position);
+        scene.add(smoke);
+
+        const smokePuff = { mesh: smoke, scale: 0.5, opacity: 0.8 };
+
+        function animateSmoke() {
+          smokePuff.scale += 0.02;
+          smokePuff.opacity -= 0.02;
+          smoke.scale.set(smokePuff.scale, smokePuff.scale, smokePuff.scale);
+          smoke.material.opacity = smokePuff.opacity;
+
+          if (smokePuff.opacity > 0) requestAnimationFrame(animateSmoke);
+          else scene.remove(smoke);
+        }
+
+        animateSmoke();
+      }
+
+      function onKeyDown(event) {
+        keyboard[event.code] = true;
+        if (event.code === "KeyW") player.moveForward = true;
+        if (event.code === "KeyS") player.moveBackward = true;
+        if (event.code === "KeyA") player.moveLeft = true;
+        if (event.code === "KeyD") player.moveRight = true;
+      }
+
+      function onKeyUp(event) {
+        keyboard[event.code] = false;
+        if (event.code === "KeyW") player.moveForward = false;
+        if (event.code === "KeyS") player.moveBackward = false;
+        if (event.code === "KeyA") player.moveLeft = false;
+        if (event.code === "KeyD") player.moveRight = false;
+      }
+
+      function onMouseDown(event) {
+        if (pointerLocked && !isGameOver) shoot();
+      }
+
+      function onMouseMove(event) {
+        if (pointerLocked && !isGameOver) {
+          const movementX =
+            event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+          const movementY =
+            event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+          player.rotation.y -= movementX * 0.002;
+          player.rotation.x -= movementY * 0.002;
+          player.rotation.x = Math.max(
+            -Math.PI / 2,
+            Math.min(Math.PI / 2, player.rotation.x)
+          );
+        }
+      }
+
+      function shoot() {
+        const bullet = {
+          position: new THREE.Vector3().copy(player.position),
+          velocity: new THREE.Vector3(0, 0, -1).applyEuler(player.rotation),
+          radius: 0.1,
+        };
+
+        bullets.push(bullet);
+
+        for (let i = 0; i < enemies.length; i++) {
+          const enemy = enemies[i];
+          if (
+            !enemy.defeated &&
+            bullet.position.distanceTo(enemy.position) <
+              enemy.radius + bullet.radius
+          ) {
+            enemy.health -= 50;
+            if (enemy.health <= 0) {
+              enemy.defeated = true;
+              enemiesDefeated++;
+              document.getElementById("enemies").textContent = enemiesDefeated;
+              playerScore += 100;
+              document.getElementById("score").textContent = playerScore;
+              createSmokePuff(enemy.position);
+              scene.remove(enemy.group);
+            }
+            bullets.splice(bullets.indexOf(bullet), 1);
+            break;
+          }
+        }
+
+        for (let i = 0; i < walls.length; i++) {
+          const wall = walls[i];
+          if (
+            bullet.position.distanceTo(wall.position) <
+              wall.width / 2 + bullet.radius &&
+            bullet.position.distanceTo(wall.position) <
+              wall.depth / 2 + bullet.radius
+          ) {
+            bullets.splice(bullets.indexOf(bullet), 1);
+            break;
+          }
+        }
+      }
+
+      function updatePlayer(deltaTime) {
+        const speed = player.speed * deltaTime;
+        const velocity = new THREE.Vector3();
+
+        if (player.moveForward) velocity.z -= speed;
+        if (player.moveBackward) velocity.z += speed;
+        if (player.moveLeft) velocity.x -= speed;
+        if (player.moveRight) velocity.x += speed;
+
+        velocity.applyEuler(player.rotation);
+        player.position.add(velocity);
+
+        camera.position.copy(player.position);
+        camera.rotation.copy(player.rotation);
+
+        for (let i = 0; i < walls.length; i++) {
+          const wall = walls[i];
+          if (
+            player.position.distanceTo(wall.position) < wall.width / 2 + 0.5 &&
+            player.position.distanceTo(wall.position) < wall.depth / 2 + 0.5
+          ) {
+            player.position.sub(velocity);
+            break;
+          }
+        }
+      }
+
+      function updateEnemies(deltaTime) {
+        for (let i = 0; i < enemies.length; i++) {
+          const enemy = enemies[i];
+          if (!enemy.defeated) {
+            const direction = new THREE.Vector3()
+              .subVectors(player.position, enemy.position)
+              .normalize();
+            enemy.velocity.copy(
+              direction.multiplyScalar(ENEMY_SPEED * deltaTime)
+            );
+            enemy.position.add(enemy.velocity);
+            enemy.group.position.copy(enemy.position);
+
+            if (
+              enemy.position.distanceTo(player.position) < 1.5 &&
+              Date.now() - enemy.lastAttackTime > 1000
+            ) {
+              playerHealth -= 10;
+              document.getElementById("health").textContent = playerHealth;
+              enemy.lastAttackTime = Date.now();
+              if (playerHealth <= 0) {
+                gameOver(false);
+              }
+            }
+          }
+        }
+      }
+
+      function updateBullets(deltaTime) {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const bullet = bullets[i];
+          bullet.position.add(
+            bullet.velocity.multiplyScalar(BULLET_SPEED * deltaTime)
+          );
+
+          if (bullet.position.distanceTo(player.position) > 50) {
+            bullets.splice(i, 1);
+          }
+        }
+      }
+
+      function updateTokens() {
+        for (let i = tokens.length - 1; i >= 0; i--) {
+          const token = tokens[i];
+          if (
+            !token.collected &&
+            player.position.distanceTo(token.position) < token.radius
+          ) {
+            token.collected = true;
+            tokensCollected++;
+            document.getElementById("tokens").textContent = tokensCollected;
+            playerScore += 50;
+            document.getElementById("score").textContent = playerScore;
+            scene.remove(token.group);
+          }
+        }
+      }
+
+      function checkWinCondition() {
+        if (
+          tokensCollected >= TOTAL_TOKENS &&
+          enemiesDefeated >= TOTAL_ENEMIES
+        ) {
+          gameOver(true);
+        }
+      }
+
+      function gameOver(win) {
+        isGameOver = true;
+        document.getElementById("gameOver").style.display = "block";
+        document.getElementById("gameOverMessage").textContent = win
+          ? "You Win!"
+          : "Game Over!";
+        document.exitPointerLock();
+      }
+
+      function restartGame() {
+        document.getElementById("gameOver").style.display = "none";
+        document.getElementById("startScreen").style.display = "flex";
+        document.getElementById("health").textContent = 100;
+        document.getElementById("tokens").textContent = 0;
+        document.getElementById("enemies").textContent = 0;
+        document.getElementById("score").textContent = 0;
+        playerHealth = 100;
+        tokensCollected = 0;
+        enemiesDefeated = 0;
+        playerScore = 0;
+        isGameOver = false;
+        gameStarted = false;
+        player.position.set(0, PLAYER_HEIGHT, 0);
+        player.rotation.set(0, 0, 0, "YXZ");
+        camera.position.set(0, PLAYER_HEIGHT, 0);
+        camera.rotation.set(0, 0, 0, "YXZ");
+        scene.remove.apply(scene, scene.children);
+        tokens = [];
+        enemies = [];
+        bullets = [];
+        walls = [];
+        init();
+      }
+
+      function animate(time) {
+        if (!isGameOver) {
+          requestAnimationFrame(animate);
+          const deltaTime = (time - lastTime) / 1000;
+          lastTime = time;
+
+          updatePlayer(deltaTime);
+          updateEnemies(deltaTime);
+          updateBullets(deltaTime);
+          updateTokens();
+          checkWinCondition();
+
+          renderer.render(scene, camera);
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>
